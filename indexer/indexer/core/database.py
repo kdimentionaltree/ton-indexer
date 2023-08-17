@@ -145,13 +145,12 @@ class Transaction(Base):
     block_shard = Column(BigInteger)
     block_seqno = Column(Integer)
 
-    mc_block_seqno = Column(Integer)
-
     block = relationship("Block", 
                          back_populates="transactions")
 
-    tenant_id: int = Column(Integer, primary_key=True)
     hash = Column(String, primary_key=True)
+    tenant_id: int = Column(Integer, primary_key=True)
+
     account = Column(String)
     lt = Column(BigInteger)
     prev_trans_hash = Column(String)
@@ -176,19 +175,20 @@ class Transaction(Base):
                                        viewonly=True)
 
     description = Column(JSONB)
-    messages = relationship("TransactionMessage", back_populates="transaction")
+    messages = relationship("Message", back_populates="transaction")
+
 
 class Message(Base):
     # citus distributed table
     __tablename__ = 'messages'
     __table_args__ = (
-        
+        ForeignKeyConstraint(["tenant_id", "transaction_hash"], ["transactions.tenant_id", "transactions.hash"])
     )
 
     tenant_id: int = Column(Integer, primary_key=True)
-    hash: str = Column(String(44), primary_key=True)
+    transaction_hash: str = Column(String(44), primary_key=True)
     direction = Column(Enum('in', 'out', name="direction"), primary_key=True)
-    transaction_hash: str = Column(String(44))
+    message_hash: str = Column(String(44), primary_key=True)
     
     source: str = Column(String)
     destination: str = Column(String)
@@ -205,30 +205,29 @@ class Message(Base):
     body_hash: str = Column(String(44))
     init_state_hash: Optional[str] = Column(String(44), nullable=True)
 
-    transactions = relationship("TransactionMessage", 
-                                foreign_keys=[hash],
-                                primaryjoin="TransactionMessage.message_hash == Message.hash", 
-                                viewonly=True)
-    message_content = relationship("MessageContent", 
-                                   foreign_keys=[body_hash],
-                                   primaryjoin="Message.body_hash == MessageContent.hash",
-                                   viewonly=True)
-    init_state = relationship("MessageContent", 
-                              foreign_keys=[init_state_hash],
-                              primaryjoin="Message.init_state_hash == MessageContent.hash", 
-                              viewonly=True)
+    transaction = relationship("Transaction", back_populates="messages")
+
+    # message_content = relationship("MessageContent", 
+    #                                foreign_keys=[body_hash],
+    #                                primaryjoin="Message.body_hash == MessageContent.hash",
+    #                                viewonly=True)
+    # init_state = relationship("MessageContent", 
+    #                           foreign_keys=[init_state_hash],
+    #                           primaryjoin="Message.init_state_hash == MessageContent.hash", 
+    #                           viewonly=True)
+
+
 
 
 # class TransactionMessage(Base):
 #     # citus distributed table
 #     __tablename__ = 'transaction_messages'
-#     tenant_id: int = Column(Integer)
+#     tenant_id: int = Column(Integer, primary_key=True)
 #     transaction_hash = Column(String(44), ForeignKey('transactions.hash'), primary_key=True)
 #     message_hash = Column(String(44), primary_key=True)
 #     direction = Column(Enum('in', 'out', name="direction"), primary_key=True)
 
 #     transaction = relationship("Transaction", back_populates="messages")
-#     # message = relationship("Message", back_populates="transactions")
 #     message = relationship("Message", foreign_keys=[message_hash],
 #                                       primaryjoin="TransactionMessage.message_hash == Message.hash", 
 #                                       viewonly=True)
