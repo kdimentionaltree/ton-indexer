@@ -118,7 +118,7 @@ class Block(Base):
 
 
 class AccountState(Base):
-    # citus disributed table
+    # citus distributed table
     __tablename__ = 'account_states'
 
     tenant_id: int = Column(Integer, primary_key=True)
@@ -132,7 +132,7 @@ class AccountState(Base):
 
 
 class Transaction(Base):
-    # citus distibuted table
+    # citus distributed table
     __tablename__ = 'transactions'
     __table_args__ = (
         ForeignKeyConstraint(
@@ -148,8 +148,8 @@ class Transaction(Base):
     block = relationship("Block", 
                          back_populates="transactions")
 
-    hash = Column(String, primary_key=True)
     tenant_id: int = Column(Integer, primary_key=True)
+    hash = Column(String, primary_key=True)
 
     account = Column(String)
     lt = Column(BigInteger)
@@ -178,17 +178,30 @@ class Transaction(Base):
     messages = relationship("Message", back_populates="transaction")
 
 
-class Message(Base):
+class TransactionMessage(Base):
     # citus distributed table
-    __tablename__ = 'messages'
+    __tablename__ = 'transaction_messages'
     __table_args__ = (
-        ForeignKeyConstraint(["tenant_id", "transaction_hash"], ["transactions.tenant_id", "transactions.hash"])
+        ForeignKeyConstraint(["tenant_id", "transaction_hash"], ["transactions.tenant_id", "transactions.hash"]),
     )
 
     tenant_id: int = Column(Integer, primary_key=True)
-    transaction_hash: str = Column(String(44), primary_key=True)
+    transaction_hash = Column(String(44), primary_key=True)
+    message_hash = Column(String(44), primary_key=True)
     direction = Column(Enum('in', 'out', name="direction"), primary_key=True)
-    message_hash: str = Column(String(44), primary_key=True)
+
+    transaction = relationship("Transaction", back_populates="messages")
+    message = relationship("Message", foreign_keys=[tenant_id, message_hash],
+                                      primaryjoin="TransactionMessage.tenant_id = Message.tenant_id and TransactionMessage.message_hash == Message.hash", 
+                                      viewonly=True)
+
+
+class Message(Base):
+    # citus distributed table
+    __tablename__ = 'messages'
+    
+    tenant_id: int = Column(Integer, primary_key=True)
+    hash: str = Column(String(44), primary_key=True)
     
     source: str = Column(String)
     destination: str = Column(String)
@@ -205,44 +218,31 @@ class Message(Base):
     body_hash: str = Column(String(44))
     init_state_hash: Optional[str] = Column(String(44), nullable=True)
 
-    transaction = relationship("Transaction", back_populates="messages")
+    transaction = relationship("Transaction", 
+                               foreign_keys=[tenant_id, hash],
+                               primaryjoin="TransactionMessage.tenant_id = Message.tenant_id and TransactionMessage.message_hash == Message.hash", 
+                               viewonly=True)
 
-    # message_content = relationship("MessageContent", 
-    #                                foreign_keys=[body_hash],
-    #                                primaryjoin="Message.body_hash == MessageContent.hash",
-    #                                viewonly=True)
-    # init_state = relationship("MessageContent", 
-    #                           foreign_keys=[init_state_hash],
-    #                           primaryjoin="Message.init_state_hash == MessageContent.hash", 
-    #                           viewonly=True)
-
-
-
-
-# class TransactionMessage(Base):
-#     # citus distributed table
-#     __tablename__ = 'transaction_messages'
-#     tenant_id: int = Column(Integer, primary_key=True)
-#     transaction_hash = Column(String(44), ForeignKey('transactions.hash'), primary_key=True)
-#     message_hash = Column(String(44), primary_key=True)
-#     direction = Column(Enum('in', 'out', name="direction"), primary_key=True)
-
-#     transaction = relationship("Transaction", back_populates="messages")
-#     message = relationship("Message", foreign_keys=[message_hash],
-#                                       primaryjoin="TransactionMessage.message_hash == Message.hash", 
-#                                       viewonly=True)
+    message_content = relationship("MessageContent", 
+                                   foreign_keys=[tenant_id, body_hash],
+                                   primaryjoin="Message.tenant_id == MessageContent.tenant_id and Message.body_hash == MessageContent.hash",
+                                   viewonly=True)
+    init_state = relationship("MessageContent", 
+                              foreign_keys=[tenant_id, init_state_hash],
+                              primaryjoin="Message.tenant_id == MessageContent.tenant_id and Message.init_state_hash == MessageContent.hash", 
+                              viewonly=True)
 
 
-# # BLOB Storage?
-# class MessageContent(Base):
-#     # citus distributed table
-#     __tablename__ = 'message_contents'
+# BLOB Storage?
+class MessageContent(Base):
+    # citus distributed table
+    __tablename__ = 'message_contents'
     
-#     tenant_id: int = Column(Integer)
-#     hash: str = Column(String(44), primary_key=True)
-#     body: str = Column(String)
+    tenant_id: int = Column(Integer, primary_key=True)
+    hash: str = Column(String(44), primary_key=True)
+    body: str = Column(String)
 
-#     # message = relationship("Message", back_populates="message_content")
+    # message = relationship("Message", back_populates="message_content")
 
 
 class JettonWallet(Base):
@@ -287,8 +287,14 @@ class JettonMaster(Base):
 class JettonTransfer(Base):
     # citus distributed table
     __tablename__ = 'jetton_transfers'
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "transaction_hash"],
+            ["transactions.tenant_id", "transactions.hash"]
+        ),
+    )
     tenant_id: int = Column(Integer, primary_key=True)
-    transaction_hash = Column(String, ForeignKey("transactions.hash"), primary_key=True)
+    transaction_hash = Column(String(44),  primary_key=True)
     query_id: int = Column(Numeric)
     amount: int = Column(Numeric)
     source = Column(String)
@@ -308,8 +314,15 @@ class JettonTransfer(Base):
 class JettonBurn(Base):
     # citus distributed table
     __tablename__ = 'jetton_burns'
-    tenant_id: int = Column(Integer)
-    transaction_hash = Column(String, ForeignKey("transactions.hash"), primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "transaction_hash"],
+            ["transactions.tenant_id", "transactions.hash"]
+        ),
+    )
+    
+    tenant_id: int = Column(Integer, primary_key=True)
+    transaction_hash = Column(String(44), primary_key=True)
     query_id: int = Column(Numeric)
     owner: str = Column(String)
     jetton_wallet_address: str = Column(String)
@@ -366,8 +379,14 @@ class NFTItem(Base):
 class NFTTransfer(Base):
     # citus distributed table
     __tablename__ = 'nft_transfers'
-    tenant_id: int = Column(Integer)
-    transaction_hash = Column(String, ForeignKey("transactions.hash"), primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "transaction_hash"],
+            ["transactions.tenant_id", "transactions.hash"]
+        ),
+    )
+    tenant_id: int = Column(Integer, primary_key=True)
+    transaction_hash = Column(String(44),  primary_key=True)
     query_id: int = Column(Numeric)
     nft_item_address = Column(String)  # TODO: index
     old_owner = Column(String)  # TODO: index
@@ -383,62 +402,62 @@ class NFTTransfer(Base):
                                      primaryjoin="NFTItem.address == NFTTransfer.nft_item_address",)
 
 
-# # Indexes
-# # Index("blocks_index_1", Block.workchain, Block.shard, Block.seqno, postgresql_using='btree', postgresql_concurrently=True)
-# Index("blocks_index_2", Block.gen_utime, postgresql_using='btree', postgresql_concurrently=True)
-# Index("blocks_index_3", Block.mc_block_workchain, Block.mc_block_shard, Block.mc_block_seqno, postgresql_using='btree', postgresql_concurrently=True)
+# Indexes
+# Index("blocks_index_1", Block.workchain, Block.shard, Block.seqno, postgresql_using='btree', postgresql_concurrently=False)
+Index("blocks_index_2", Block.gen_utime, postgresql_using='btree', postgresql_concurrently=False)
+Index("blocks_index_3", Block.mc_block_workchain, Block.mc_block_shard, Block.mc_block_seqno, postgresql_using='btree', postgresql_concurrently=False)
 
-# Index("transactions_index_1", Transaction.block_workchain, Transaction.block_shard, Transaction.block_seqno, postgresql_using='btree', postgresql_concurrently=True)
-# Index("transactions_index_2", Transaction.account, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("transactions_index_3", Transaction.hash, postgresql_using='btree', postgresql_concurrently=True)
-# Index("transactions_index_4", Transaction.lt, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("transactions_index_5", Transaction.account_state_hash_before, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("transactions_index_6", Transaction.account_state_hash_after, postgresql_using='btree', postgresql_concurrently=True)
+Index("transactions_index_1", Transaction.block_workchain, Transaction.block_shard, Transaction.block_seqno, postgresql_using='btree', postgresql_concurrently=False)
+Index("transactions_index_2", Transaction.account, postgresql_using='btree', postgresql_concurrently=False)
+Index("transactions_index_3", Transaction.hash, postgresql_using='btree', postgresql_concurrently=False)
+Index("transactions_index_4", Transaction.lt, postgresql_using='btree', postgresql_concurrently=False)
+# Index("transactions_index_5", Transaction.account_state_hash_before, postgresql_using='btree', postgresql_concurrently=False)
+# Index("transactions_index_6", Transaction.account_state_hash_after, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index('account_states_index_1', AccountState.hash, postgresql_using='btree', postgresql_concurrently=True)
-# # Index('account_states_index_2', AccountState.code_hash, postgresql_using='btree', postgresql_concurrently=True)
+# Index('account_states_index_1', AccountState.hash, postgresql_using='btree', postgresql_concurrently=False)
+# Index('account_states_index_2', AccountState.code_hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("messages_index_1", Message.hash, postgresql_using='btree', postgresql_concurrently=True)
-# Index("messages_index_2", Message.source, postgresql_using='btree', postgresql_concurrently=True)
-# Index("messages_index_3", Message.destination, postgresql_using='btree', postgresql_concurrently=True)
-# Index("messages_index_4", Message.created_lt, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("messages_index_5", Message.created_at, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("messages_index_6", Message.body_hash, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("messages_index_7", Message.init_state_hash, postgresql_using='btree', postgresql_concurrently=True)
+Index("messages_index_1", Message.hash, postgresql_using='btree', postgresql_concurrently=False)
+Index("messages_index_2", Message.source, postgresql_using='btree', postgresql_concurrently=False)
+Index("messages_index_3", Message.destination, postgresql_using='btree', postgresql_concurrently=False)
+Index("messages_index_4", Message.created_lt, postgresql_using='btree', postgresql_concurrently=False)
+# Index("messages_index_5", Message.created_at, postgresql_using='btree', postgresql_concurrently=False)
+# Index("messages_index_6", Message.body_hash, postgresql_using='btree', postgresql_concurrently=False)
+# Index("messages_index_7", Message.init_state_hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("transaction_messages_index_1", TransactionMessage.transaction_hash, postgresql_using='btree', postgresql_concurrently=True)
-# Index("transaction_messages_index_2", TransactionMessage.message_hash, postgresql_using='btree', postgresql_concurrently=True)
+# Index("transaction_messages_index_1", TransactionMessage.transaction_hash, postgresql_using='btree', postgresql_concurrently=False)
+Index("transaction_messages_index_2", TransactionMessage.message_hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# Index("message_contents_index_1", MessageContent.hash, postgresql_using='btree', postgresql_concurrently=True)
+Index("message_contents_index_1", MessageContent.hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("jetton_wallets_index_1", JettonWallet.address, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_wallets_index_2", JettonWallet.owner, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_wallets_index_3", JettonWallet.jetton, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("jetton_wallets_index_4", JettonWallet.code_hash, postgresql_using='btree', postgresql_concurrently=True)
+# Index("jetton_wallets_index_1", JettonWallet.address, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_wallets_index_2", JettonWallet.owner, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_wallets_index_3", JettonWallet.jetton, postgresql_using='btree', postgresql_concurrently=False)
+# Index("jetton_wallets_index_4", JettonWallet.code_hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("jetton_masters_index_1", JettonMaster.address, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_masters_index_2", JettonMaster.admin_address, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("jetton_masters_index_3", JettonMaster.code_hash, postgresql_using='btree', postgresql_concurrently=True)
+# Index("jetton_masters_index_1", JettonMaster.address, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_masters_index_2", JettonMaster.admin_address, postgresql_using='btree', postgresql_concurrently=False)
+# Index("jetton_masters_index_3", JettonMaster.code_hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("jetton_transfers_index_1", JettonTransfer.transaction_hash, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_transfers_index_2", JettonTransfer.source, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_transfers_index_3", JettonTransfer.destination, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_transfers_index_4", JettonTransfer.jetton_wallet_address, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("jetton_transfers_index_5", JettonTransfer.response_destination, postgresql_using='btree', postgresql_concurrently=True)
+# Index("jetton_transfers_index_1", JettonTransfer.transaction_hash, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_transfers_index_2", JettonTransfer.source, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_transfers_index_3", JettonTransfer.destination, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_transfers_index_4", JettonTransfer.jetton_wallet_address, postgresql_using='btree', postgresql_concurrently=False)
+# Index("jetton_transfers_index_5", JettonTransfer.response_destination, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("jetton_burns_index_1", JettonBurn.transaction_hash, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_burns_index_2", JettonBurn.owner, postgresql_using='btree', postgresql_concurrently=True)
-# Index("jetton_burns_index_3", JettonBurn.jetton_wallet_address, postgresql_using='btree', postgresql_concurrently=True)
+# Index("jetton_burns_index_1", JettonBurn.transaction_hash, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_burns_index_2", JettonBurn.owner, postgresql_using='btree', postgresql_concurrently=False)
+Index("jetton_burns_index_3", JettonBurn.jetton_wallet_address, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("nft_collections_index_1", NFTCollection.address, postgresql_using='btree', postgresql_concurrently=True)
-# Index("nft_collections_index_2", NFTCollection.owner_address, postgresql_using='btree', postgresql_concurrently=True)
-# # Index("nft_collections_index_3", NFTCollection.code_hash, postgresql_using='btree', postgresql_concurrently=True)
+# Index("nft_collections_index_1", NFTCollection.address, postgresql_using='btree', postgresql_concurrently=False)
+Index("nft_collections_index_2", NFTCollection.owner_address, postgresql_using='btree', postgresql_concurrently=False)
+# Index("nft_collections_index_3", NFTCollection.code_hash, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("nft_items_index_1", NFTItem.address, postgresql_using='btree', postgresql_concurrently=True)
-# Index("nft_items_index_2", NFTItem.collection_address, postgresql_using='btree', postgresql_concurrently=True)
-# Index("nft_items_index_3", NFTItem.owner_address, postgresql_using='btree', postgresql_concurrently=True)
+# Index("nft_items_index_1", NFTItem.address, postgresql_using='btree', postgresql_concurrently=False)
+Index("nft_items_index_2", NFTItem.collection_address, postgresql_using='btree', postgresql_concurrently=False)
+Index("nft_items_index_3", NFTItem.owner_address, postgresql_using='btree', postgresql_concurrently=False)
 
-# # Index("nft_transfers_index_1", NFTTransfer.transaction_hash, postgresql_using='btree', postgresql_concurrently=True)
-# Index("nft_transfers_index_2", NFTTransfer.nft_item_address, postgresql_using='btree', postgresql_concurrently=True)
-# Index("nft_transfers_index_3", NFTTransfer.old_owner, postgresql_using='btree', postgresql_concurrently=True)
-# Index("nft_transfers_index_4", NFTTransfer.new_owner, postgresql_using='btree', postgresql_concurrently=True)
+# Index("nft_transfers_index_1", NFTTransfer.transaction_hash, postgresql_using='btree', postgresql_concurrently=False)
+Index("nft_transfers_index_2", NFTTransfer.nft_item_address, postgresql_using='btree', postgresql_concurrently=False)
+Index("nft_transfers_index_3", NFTTransfer.old_owner, postgresql_using='btree', postgresql_concurrently=False)
+Index("nft_transfers_index_4", NFTTransfer.new_owner, postgresql_using='btree', postgresql_concurrently=False)
